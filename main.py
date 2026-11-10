@@ -164,8 +164,8 @@ def load_data_to_clickhouse(
 if __name__ == "__main__":
 
     # Пример использования
-    client = get_clickhouse_client()
-    load_data_to_clickhouse(client, "data.xlsx", "default", "test_table", "full")
+    # client = get_clickhouse_client()
+    # load_data_to_clickhouse(client, "test.xlsx", "default", "test_table", "incremental")
 
     # Пример: как можно вручную добавить колонки, если скрипт выдал ошибку
     # client = get_clickhouse_client()
