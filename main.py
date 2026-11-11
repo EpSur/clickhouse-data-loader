@@ -79,11 +79,17 @@ def ensure_columns_exist(client, schema: str, target: str):
 
     if 'actual_begin' not in existing_cols:
         logger.info(f"Колонка actual_begin отсутствует в {schema}.{target}. Добавляем...")
-        client.command(f"ALTER TABLE {schema}.{target} ADD COLUMN actual_begin DateTime DEFAULT now('Europe/Moscow')")
+        client.command(
+            f"ALTER TABLE {schema}.{target} "
+            f"ADD COLUMN actual_begin DateTime DEFAULT now('Europe/Moscow')"
+        )
 
     if 'actual_end' not in existing_cols:
         logger.info(f"Колонка actual_end отсутствует в {schema}.{target}. Добавляем...")
-        client.command(f"ALTER TABLE {schema}.{target} ADD COLUMN actual_end Nullable(DateTime) DEFAULT NULL")
+        client.command(
+            f"ALTER TABLE {schema}.{target} "
+            f"ADD COLUMN actual_end Nullable(DateTime) DEFAULT NULL"
+        )
 
     logger.info("Проверка и добавление колонок завершены.")
 
@@ -146,13 +152,15 @@ def load_data_to_clickhouse(
 
         # Проверка существования таблицы
         table_exists = client.query(
-            "SELECT count(*) > 0 FROM system.tables WHERE database = {db: String} AND name = {table: String}",
+            "SELECT count(*) > 0 FROM system.tables "
+            "WHERE database = {db: String} AND name = {table: String}",
             parameters={'db': schema, 'table': target}
         ).result_rows[0][0]
 
         if not table_exists:
             # Таблицы нет - создаем её сразу с нужными колонками
             logger.info(f"Таблица {schema}.{target} не найдена. Создаем...")
+            
             schema_ddl = pd.io.sql.get_schema(df.reset_index(drop=True), name='"')
             # Заставляем ClickHouse сделать actual_end типа Nullable(DateTime), а не String
             schema_ddl = schema_ddl.replace('"actual_end" TEXT', '"actual_end" Nullable(DateTime)')
@@ -168,7 +176,8 @@ def load_data_to_clickhouse(
         else:
             # 2. Таблица есть. Проверяем, есть ли в ней служебные колонки
             existing_cols = client.query(
-                "SELECT name FROM system.columns WHERE database = {db: String} AND table = {table: String}",
+                "SELECT name FROM system.columns "
+                "WHERE database = {db: String} AND table = {table: String}",
                 parameters={'db': schema, 'table': target}
             ).result_rows
             existing_cols = [col[0] for col in existing_cols]
@@ -177,23 +186,35 @@ def load_data_to_clickhouse(
 
             if missing_cols:
                 # 3. Если колонок нет - выводим уведомление и ПРЕКРАЩАЕМ работу
-                logger.error(f"ОШИБКА: Таблица {schema}.{target} уже существует, но в ней нет колонок: {missing_cols}.")
-                logger.error(f"Выполнение остановлено. Ничего не изменено.")
                 logger.error(
-                    f"Если вы хотите добавить колонки, запустите функцию вручную: ensure_columns_exist(client, '{schema}', '{target}')")
+                    f"ОШИБКА: Таблица {schema}.{target} уже существует, "
+                    f"но в ней нет колонок: {missing_cols}."
+                )
+                logger.error("Выполнение остановлено. Ничего не изменено.")
+                logger.error(
+                    f"Если вы хотите добавить колонки, запустите функцию вручную: "
+                    f"ensure_columns_exist(client, '{schema}', '{target}')"
+                )
                 return None
 
         # Логика обновления
         if update_type == 'full':
             temp_table = f"{schema}.temp_{target}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
             logger.info(f"Создаем бэкап во временной таблице {temp_table}")
+            
             client.command(
-                f"CREATE TABLE {temp_table} ENGINE = MergeTree() ORDER BY tuple() AS SELECT * FROM {schema}.{target}")
+                f"CREATE TABLE {temp_table} "
+                f"ENGINE = MergeTree() ORDER BY tuple() "
+                f"AS SELECT * FROM {schema}.{target}"
+            )
 
             try:
                 logger.info("Помечаем старые данные как неактуальные...")
                 client.command(
-                    f"ALTER TABLE {schema}.{target} UPDATE actual_end = now('Europe/Moscow') WHERE actual_end IS NULL")
+                    f"ALTER TABLE {schema}.{target} "
+                    f"UPDATE actual_end = now('Europe/Moscow') "
+                    f"WHERE actual_end IS NULL"
+                )
 
                 logger.info("Вставляем новые данные...")
                 client.insert_df(f"{schema}.{target}", df)
