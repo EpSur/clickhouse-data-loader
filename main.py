@@ -19,7 +19,28 @@ load_dotenv()
 
 
 def get_clickhouse_client():
-    """Создает и возвращает клиент ClickHouse, используя переменные окружения."""
+    """
+    Создает и возвращает клиент ClickHouse, используя параметры подключения 
+    из переменных окружения.
+    
+    Функция считывает конфигурацию для подключения к базе данных из 
+    переменных окружения (обычно загружаемых из файла .env). Если какая-либо 
+    переменная не задана, используются безопасные значения по умолчанию 
+    (например, localhost и стандартный порт 8123).
+
+    Используемые переменные окружения:
+        - CH_HOST: Хост сервера ClickHouse (по умолчанию 'localhost').
+        - CH_PORT: Порт для подключения (по умолчанию 8123).
+        - CH_USER: Имя пользователя БД (по умолчанию 'default').
+        - CH_PASSWORD: Пароль пользователя (по умолчанию пустая строка).
+
+    Args:
+        Нет (функция не принимает аргументов).
+
+    Returns:
+        Client: Инициализированный экземпляр клиента ClickHouse 
+        (clickhouse_connect.driver.client.Client).
+    """
     return get_client(
         host=os.getenv('CH_HOST', 'localhost'),
         port=int(os.getenv('CH_PORT', 8123)),
@@ -30,8 +51,25 @@ def get_clickhouse_client():
 
 def ensure_columns_exist(client, schema: str, target: str):
     """
-    Утилита для ручного добавления системных колонок (actual_begin, actual_end).
-    Вызывать отдельно, если load_data_to_clickhouse выдала ошибку об их отсутствии.
+    Проверяет наличие системных колонок и при необходимости добавляет их в таблицу.
+    
+    Утилита предназначена для ручного исправления структуры таблицы, если 
+    в ней отсутствуют колонки 'actual_begin' и/или 'actual_end', необходимые 
+    для поддержки историчности данных (SCD Type 2). Обычно вызывается 
+    вручную, если основная функция `load_data_to_clickhouse` прервала работу 
+    с ошибкой об их отсутствии.
+    
+    Для колонки 'actual_begin' устанавливается тип DateTime со значением 
+    по умолчанию текущего времени (Europe/Moscow). Для 'actual_end' — 
+    Nullable(DateTime) со значением NULL.
+
+    Args:
+        client: Экземпляр клиента ClickHouse (clickhouse_connect).
+        schema (str): Имя базы данных (схемы) в ClickHouse, где находится таблица.
+        target (str): Имя таблицы, структуру которой нужно проверить/изменить.
+
+    Returns:
+        None
     """
     existing_cols = client.query(
         "SELECT name FROM system.columns WHERE database = {db: String} AND table = {table: String}",
@@ -59,7 +97,33 @@ def load_data_to_clickhouse(
         read_kwargs: Optional[dict] = None
 ) -> Optional[tuple[datetime, int]]:
     """
-    Загружает данные из XLSX/CSV в ClickHouse.
+    Загружает данные из файла XLSX или CSV в таблицу ClickHouse с поддержкой
+    историчности данных (SCD Type 2).
+
+    Функция автоматически добавляет системные колонки 'actual_begin' и 'actual_end'
+    к загружаемым данным. Если целевая таблица не существует, она будет создана
+    автоматически с помощью генерации DDL-схемы (через sqlglot) на основе
+    структуры DataFrame. Если таблица уже существует, но в ней отсутствуют
+    системные колонки, выполнение прерывается в целях безопасности.
+
+    Args:
+        client: Экземпляр клиента ClickHouse (clickhouse_connect).
+        source (str | Path): Путь к исходному файлу (.xlsx или .csv).
+        schema (str): Имя базы данных (схемы) в ClickHouse.
+        target (str): Имя целевой таблицы для загрузки.
+        update_type (str): Режим обновления:
+            - 'full': помечает старые записи как неактуальные (устанавливает
+                      actual_end) и вставляет новые данные.
+            - 'incremental': просто добавляет новые строки в конец таблицы.
+        read_kwargs (Optional[dict], optional): Дополнительные параметры для
+            функции pd.read_csv (например, sep, encoding, dtype).
+            По умолчанию None.
+
+    Returns:
+        Optional[tuple[datetime, int]]: Кортеж, содержащий время завершения
+        операции и количество загруженных строк (df.shape[0]).
+        Возвращает None, если в процессе чтения файла или загрузки данных
+        произошла ошибка.
     """
     if read_kwargs is None:
         read_kwargs = {}
@@ -164,8 +228,8 @@ def load_data_to_clickhouse(
 if __name__ == "__main__":
 
     # Пример использования
-    # client = get_clickhouse_client()
-    # load_data_to_clickhouse(client, "test.xlsx", "default", "test_table", "incremental")
+    client = get_clickhouse_client()
+    load_data_to_clickhouse(client, "data.xlsx", "default", "test_table", "full")
 
     # Пример: как можно вручную добавить колонки, если скрипт выдал ошибку
     # client = get_clickhouse_client()
